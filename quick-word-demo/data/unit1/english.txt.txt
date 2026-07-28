@@ -1,0 +1,5 @@
+1, [curious] [cautious] [serious]
+2, [magazine] [magnet] [magic]
+3, [test] [text] [taste]
+4, [windsurf] [surf] [wind]
+5, [feeling] [filling] [healing]

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>极简单词刷题 Demo</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui}
+body{max-width:680px;margin:30px auto;padding:0 15px;background:#f5f7fa}
+.container{background:#fff;padding:24px;border-radius:12px;box-shadow:0 1px 10px #00000012}
+h2{text-align:center;margin-bottom:20px;color:#222}
+.line{height:1px;background:#ddd;margin:16px 0}
+.word-show{font-size:40px;font-weight:bold;text-align:center;margin:20px 0;animation:flash 1s infinite alternate}
+@keyframes flash{0%{opacity:0.7}100%{opacity:1}}
+.tip{text-align:center;font-size:17px;color:#444;margin-bottom:16px}
+.opt{width:100%;padding:13px;margin:8px 0;border:1px solid #ccc;border-radius:8px;font-size:17px;cursor:pointer}
+.opt-right{border:2px solid #2da44e;color:#2da44e;font-weight:bold}
+.opt-wrong{color:#999;text-decoration:line-through double}
+.opt:disabled{cursor:not-allowed}
+.btn{padding:10px 20px;border:none;border-radius:6px;background:#2563eb;color:#fff;font-size:16px;margin:8px auto;display:block}
+.input-box{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;font-size:16px}
+select{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;font-size:16px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;display:none}
+.modal-box{background:#fff;padding:30px;border-radius:12px;width:90%;max-width:450px;text-align:center}
+.face{font-size:55px;margin:10px 0}
+.hidden{display:none !important}
+.warn{color:red;text-align:center;margin:10px 0}
+.stat{margin-top:20px;padding:15px;border:1px solid #eee;border-radius:10px}
+</style>
+</head>
+<body>
+<div class="container" id="pageStart">
+    <h2>单词刷题 Demo</h2>
+    <p>选择题库文件夹</p>
+    <select id="unitSel">
+        <option value="unit1">unit1</option>
+    </select>
+    <input class="input-box" id="startInput" placeholder="输入起始行号，空则从头开始">
+    <button class="btn" onclick="loadUnit()">开始刷题</button>
+    <div class="warn" id="warnText"></div>
+</div>
+
+<div class="container hidden" id="pageQuiz">
+    <div class="word-show" id="enWord"></div>
+    <button class="btn" onclick="playVoice()">朗读单词</button>
+    <div class="line"></div>
+    <p class="tip">请根据单词选择正确中文释义</p>
+    <div class="line"></div>
+    <div id="optionWrap"></div>
+    <div class="stat">
+        <p>进度：<span id="curNum">0</span>/<span id="totalNum">0</span></p>
+        <p>正确：<span id="okCount">0</span> 错误：<span id="errCount">0</span></p>
+    </div>
+</div>
+
+<!-- 答对弹窗 -->
+<div class="modal" id="modalOk">
+    <div class="modal-box">
+        <div class="face">😊</div>
+        <p id="okEn"></p>
+        <p id="okCn"></p>
+        <button class="btn" onclick="closeModal('modalOk')">确定</button>
+    </div>
+</div>
+
+<!-- 答错弹窗 -->
+<div class="modal" id="modalErr">
+    <div class="modal-box">
+        <div class="face">😢</div>
+        <p id="errEn"></p>
+        <p>正确释义：<span id="trueCn"></span></p>
+        <p>你的选择：<span id="selCn"></span></p>
+        <button class="btn" onclick="closeModal('modalErr')">确定</button>
+    </div>
+</div>
+
+<!-- 结束汇总弹窗 -->
+<div class="modal" id="modalSum">
+    <div class="modal-box">
+        <h3>刷题完成</h3>
+        <p>总题：<span id="sumTotal"></span></p>
+        <p>答对：<span id="sumOk"></span></p>
+        <p>答错：<span id="sumErr"></span></p>
+        <p>正确率：<span id="sumRate"></span>%</p>
+        <button class="btn" onclick="location.reload()">重新开始</button>
+    </div>
+</div>
+
+<script>
+let wordData = [];
+let currentIndex = 0;
+let startIndex = 0;
+let okCount = 0;
+let errCount = 0;
+let errList = [];
+
+// 提取[]内文字
+function getBracketContent(str){
+    const reg = /\[(.*?)\]/g;
+    const arr = [];
+    let match;
+    while((match = reg.exec(str)) !== null){
+        arr.push(match[1].trim())
+    }
+    return arr;
+}
+
+// 文本转单词数组
+function parseText(enText, cnText){
+    const enLines = enText.trim().split(/\r?\n/).filter(s=>s.trim());
+    const cnLines = cnText.trim().split(/\r?\n/).filter(s=>s.trim());
+    if(enLines.length !== cnLines.length) return null;
+    const list = [];
+    for(let i=0;i<enLines.length;i++){
+        const enLine = enLines[i];
+        const cnLine = cnLines[i];
+        const enPart = enLine.split(", ")[1];
+        const cnPart = cnLine.split(", ")[1];
+        const enArr = getBracketContent(enPart);
+        const cnArr = getBracketContent(cnPart);
+        list.push({
+            en: enArr[0],
+            cnTrue: cnArr[0],
+            cnAll: cnArr
+        })
+    }
+    return list;
+}
+
+// 打乱数组
+function shuffle(arr){
+    const a = [...arr];
+    for(let i=a.length-1;i>0;i--){
+        const j = Math.floor(Math.random()*(i+1));
+        [a[i],a[j]] = [a[j],a[i]]
+    }
+    return a;
+}
+
+// 语音朗读
+function speak(text, lang="en-US"){
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    u.rate = 0.9;
+    window.speechSynthesis.speak(u);
+}
+
+// 加载题库文件
+async function loadUnit(){
+    const unit = document.getElementById("unitSel").value;
+    const warnDom = document.getElementById("warnText");
+    warnDom.innerText = "";
+    try{
+        const enRes = await fetch(`./data/${unit}/english.txt`);
+        const cnRes = await fetch(`./data/${unit}/chinese.txt`);
+        if(!enRes.ok || !cnRes.ok) throw "缺少txt文件";
+        const enTxt = await enRes.text();
+        const cnTxt = await cnRes.text();
+        wordData = parseText(enTxt, cnTxt);
+        if(!wordData){
+            warnDom.innerText = "中英文行数不一致";
+            return;
+        }
+    }catch(e){
+        warnDom.innerText = "读取文件失败，请检查data/unit1下txt文件";
+        return;
+    }
+    // 读取起始位置
+    const startVal = document.getElementById("startInput").value.trim();
+    if(startVal !== ""){
+        const num = parseInt(startVal);
+        if(!isNaN(num) && num >=1 && num <= wordData.length){
+            startIndex = num - 1;
+        }else{
+            startIndex = 0;
+        }
+    }else{
+        startIndex = 0;
+    }
+    currentIndex = startIndex;
+    // 切换页面
+    document.getElementById("pageStart").classList.add("hidden");
+    document.getElementById("pageQuiz").classList.remove("hidden");
+    renderWord();
+}
+
+// 渲染当前题目
+function renderWord(){
+    const item = wordData[currentIndex];
+    document.getElementById("enWord").innerText = item.en;
+    document.getElementById("curNum").innerText = currentIndex + 1;
+    document.getElementById("totalNum").innerText = wordData.length;
+    document.getElementById("okCount").innerText = okCount;
+    document.getElementById("errCount").innerText = errCount;
+    // 打乱选项
+    const opts = shuffle([...item.cnAll]);
+    const wrap = document.getElementById("optionWrap");
+    wrap.innerHTML = "";
+    opts.forEach(opt=>{
+        const btn = document.createElement("button");
+        btn.className = "opt";
+        btn.innerText = opt;
+        btn.onclick = ()=>check(opt, item);
+        wrap.appendChild(btn);
+    })
+}
+
+// 朗读当前单词
+function playVoice(){
+    const word = wordData[currentIndex].en;
+    speak(word);
+}
+
+// 答案判断
+function check(selectCn, wordItem){
+    const wrap = document.getElementById("optionWrap");
+    const btns = wrap.querySelectorAll(".opt");
+    // 全部禁用
+    btns.forEach(b=>b.disabled = true);
+    // 标记对错样式
+    btns.forEach(b=>{
+        if(b.innerText === wordItem.cnTrue){
+            b.classList.add("opt-right");
+        }else{
+            b.classList.add("opt-wrong");
+        }
+    })
+    if(selectCn === wordItem.cnTrue){
+        // 答对
+        okCount++;
+        document.getElementById("okEn").innerText = wordItem.en;
+        document.getElementById("okCn").innerText = wordItem.cnTrue;
+        document.getElementById("modalOk").style.display = "flex";
+        setTimeout(()=>{
+            closeModal("modalOk");
+            next();
+        }, 3000)
+    }else{
+        // 答错
+        errCount++;
+        errList.push(`${wordItem.en}(${wordItem.cnTrue})`);
+        speak(wordItem.en);
+        setTimeout(()=>speak(wordItem.cnTrue, "zh-CN"), 600);
+        document.getElementById("errEn").innerText = wordItem.en;
+        document.getElementById("trueCn").innerText = wordItem.cnTrue;
+        document.getElementById("selCn").innerText = selectCn;
+        document.getElementById("modalErr").style.display = "flex";
+        setTimeout(()=>{
+            closeModal("modalErr");
+            next();
+        }, 2000)
+    }
+}
+
+// 下一题 / 结束汇总
+function next(){
+    currentIndex++;
+    if(currentIndex >= wordData.length){
+        // 全部完成
+        const total = wordData.length;
+        const rate = ((okCount / total) * 100).toFixed(1);
+        document.getElementById("sumTotal").innerText = total;
+        document.getElementById("sumOk").innerText = okCount;
+        document.getElementById("sumErr").innerText = errCount;
+        document.getElementById("sumRate").innerText = rate;
+        document.getElementById("modalSum").style.display = "flex";
+        return;
+    }
+    renderWord();
+}
+
+// 关闭弹窗
+function closeModal(id){
+    document.getElementById(id).style.display = "none";
+}
+</script>
+</body>
+</html>
